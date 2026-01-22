@@ -1,6 +1,4 @@
-app.get("/", (req, res) => {
-  res.send("PhonePe backend running");
-});
+
 const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
@@ -29,6 +27,9 @@ function generateChecksum(payload, endpoint) {
   return sha256 + '###' + PHONEPE_CONFIG.saltIndex;
 }
 
+app.get("/", (req, res) => {
+  res.send("PhonePe backend running");
+});
 // Initiate Payment
 app.post('/api/phonepe/pay', async (req, res) => {
   try {
