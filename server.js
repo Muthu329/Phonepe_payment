@@ -1,3 +1,6 @@
+app.get("/", (req, res) => {
+  res.send("PhonePe backend running");
+});
 const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
