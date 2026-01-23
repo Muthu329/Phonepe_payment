@@ -12,8 +12,8 @@ const PORT = process.env.PORT || 3000;
 
 // PhonePe Config (replace with your credentials)
 const PHONEPE_CONFIG = {
-  merchantId: process.env.PHONEPE_MERCHANT_ID || 'M23YO4XQC3MUV_2601212129',
-  saltKey: process.env.PHONEPE_SALT_KEY || 'ZWEyNmU0ZTQtYjE3Ni00NWQ1LTg3YjctNmVmOGY4NTU0YjA4',
+  merchantId: process.env.PHONEPE_MERCHANT_ID || 'YOUR_MERCHANT_ID',
+  saltKey: process.env.PHONEPE_SALT_KEY || 'YOUR_SALT_KEY',
   saltIndex: process.env.PHONEPE_SALT_INDEX || '1',
   apiUrl: process.env.PHONEPE_ENV === 'PREPROD' 
     ? 'https://api.phonepe.com/apis/hermes' 
