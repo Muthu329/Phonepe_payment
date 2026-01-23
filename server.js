@@ -1,3 +1,5 @@
+app.post("/api/phonepe/pay", async (req, res) => {
+  console.log("🔥 RAW REQUEST BODY FROM BUBBLE:", req.body);
 const express = require("express");
 const crypto = require("crypto");
 const axios = require("axios");
