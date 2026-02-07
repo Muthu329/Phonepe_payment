@@ -1,3 +1,7 @@
+/**************************************************
+ * PHONEPE PG V2 BACKEND (BUBBLE COMPATIBLE)
+ **************************************************/
+
 const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
@@ -8,34 +12,37 @@ app.use(cors());
 
 const PORT = process.env.PORT || 10000;
 
-/* =========================
-   PHONEPE CONFIG (V2)
-========================= */
+/**************************************************
+ * ENV VARIABLES (SET IN RENDER)
+ **************************************************
+ * PHONEPE_CLIENT_ID
+ * PHONEPE_CLIENT_SECRET
+ * PHONEPE_CLIENT_VERSION   (usually 1)
+ * PHONEPE_ENV              (SANDBOX or PROD)
+ **************************************************/
+
 const PHONEPE = {
   clientId: process.env.PHONEPE_CLIENT_ID,
   clientSecret: process.env.PHONEPE_CLIENT_SECRET,
   clientVersion: process.env.PHONEPE_CLIENT_VERSION || "1",
   baseUrl:
-    process.env.PHONEPE_ENV === "SANDBOX"
-      ? "https://api-preprod.phonepe.com/apis/pg-sandbox"
-      : "https://api.phonepe.com/apis/pg",
+    process.env.PHONEPE_ENV === "PROD"
+      ? "https://api.phonepe.com/apis"
+      : "https://api-preprod.phonepe.com/apis/pg-sandbox",
 };
 
-let accessToken = null;
-let tokenExpiry = 0;
+if (!PHONEPE.clientId || !PHONEPE.clientSecret) {
+  console.error("❌ Missing PhonePe ENV variables");
+}
 
-/* =========================
-   GET ACCESS TOKEN
-========================= */
+/**************************************************
+ * ACCESS TOKEN FUNCTION (V2)
+ **************************************************/
 async function getAccessToken() {
-  if (accessToken && Date.now() < tokenExpiry) {
-    return accessToken;
-  }
-
   const params = new URLSearchParams();
   params.append("client_id", PHONEPE.clientId);
-  params.append("client_secret", PHONEPE.clientSecret);
   params.append("client_version", PHONEPE.clientVersion);
+  params.append("client_secret", PHONEPE.clientSecret);
   params.append("grant_type", "client_credentials");
 
   const response = await axios.post(
@@ -48,47 +55,46 @@ async function getAccessToken() {
     }
   );
 
-  accessToken = response.data.access_token;
-  tokenExpiry = response.data.expires_at * 1000;
-
-  return accessToken;
+  return response.data.access_token;
 }
 
-/* =========================
-   HEALTH CHECK
-========================= */
-app.get("/", (_, res) => {
-  res.send("✅ PhonePe V2 backend running");
+/**************************************************
+ * HEALTH CHECK
+ **************************************************/
+app.get("/", (req, res) => {
+  res.send("✅ PhonePe PG V2 backend running");
 });
 
-/* =========================
-   CREATE PAYMENT
-========================= */
+/**************************************************
+ * CREATE PAYMENT (USED BY BUBBLE)
+ **************************************************/
 app.post("/api/phonepe/create-payment", async (req, res) => {
-   res.json({ ok: true });
-});
   try {
-    const show = console.log;
-
     const { orderId, amount, redirectUrl } = req.body;
 
     if (!orderId || !amount || !redirectUrl) {
-      return res.status(400).json({ error: "Missing fields" });
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
+      });
     }
 
+    // 1️⃣ Get Access Token
     const token = await getAccessToken();
 
+    // 2️⃣ Payment Payload (V2)
     const payload = {
       merchantOrderId: orderId,
-      amount: Number(amount), // already in paise
+      amount: Number(amount), // amount in paise
       paymentFlow: {
         type: "PG_CHECKOUT",
         merchantUrls: {
-          redirectUrl,
+          redirectUrl: redirectUrl,
         },
       },
     };
 
+    // 3️⃣ Call PhonePe Create Payment API
     const response = await axios.post(
       `${PHONEPE.baseUrl}/checkout/v2/pay`,
       payload,
@@ -100,29 +106,38 @@ app.post("/api/phonepe/create-payment", async (req, res) => {
       }
     );
 
+    // 4️⃣ Return Payment URL to Bubble
     return res.json({
       success: true,
-      redirectUrl: response.data.data.instrumentResponse.redirectInfo.url,
+      paymentUrl:
+        response.data.data.instrumentResponse.redirectInfo.url,
       raw: response.data,
     });
-  } catch (err) {
-    console.error("❌ CREATE PAYMENT ERROR:", err.response?.data || err.message);
+
+  } catch (error) {
+    console.error(
+      "❌ CREATE PAYMENT ERROR:",
+      error.response?.data || error.message
+    );
+
     return res.status(500).json({
       success: false,
-      error: err.response?.data || err.message,
+      error: error.response?.data || error.message,
     });
   }
 });
 
-/* =========================
-   PAYMENT STATUS
-========================= */
+/**************************************************
+ * PAYMENT STATUS (OPTIONAL – FOR REDIRECT PAGE)
+ **************************************************/
 app.get("/api/phonepe/status/:orderId", async (req, res) => {
   try {
+    const { orderId } = req.params;
+
     const token = await getAccessToken();
 
     const response = await axios.get(
-      `${PHONEPE.baseUrl}/checkout/v2/order/${req.params.orderId}`,
+      `${PHONEPE.baseUrl}/checkout/v2/order/${orderId}`,
       {
         headers: {
           Authorization: `O-Bearer ${token}`,
@@ -130,15 +145,27 @@ app.get("/api/phonepe/status/:orderId", async (req, res) => {
       }
     );
 
-    res.json(response.data);
-  } catch (err) {
-    res.status(500).json(err.response?.data || err.message);
+    return res.json({
+      success: true,
+      status: response.data,
+    });
+
+  } catch (error) {
+    console.error(
+      "❌ STATUS ERROR:",
+      error.response?.data || error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data || error.message,
+    });
   }
 });
 
-/* =========================
-   START SERVER
-========================= */
+/**************************************************
+ * START SERVER
+ **************************************************/
 app.listen(PORT, () => {
-  console.log(`🚀 PhonePe V2 server running on ${PORT}`);
+  console.log(`🚀 PhonePe PG V2 backend running on port ${PORT}`);
 });
