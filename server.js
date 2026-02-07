@@ -1,5 +1,4 @@
 const express = require("express");
-const crypto = require("crypto");
 const axios = require("axios");
 const cors = require("cors");
 
@@ -10,204 +9,128 @@ app.use(cors());
 const PORT = process.env.PORT || 10000;
 
 /* =========================
-   PHONEPE CONFIG
+   PHONEPE CONFIG (V2)
 ========================= */
-const PHONEPE_CONFIG = {
-  merchantId: process.env.PHONEPE_MERCHANT_ID,
-  saltKey: process.env.PHONEPE_SALT_KEY,
-  saltIndex: process.env.PHONEPE_SALT_INDEX || "1",
-  apiUrl:
-    process.env.PHONEPE_ENV === "PREPROD"
+const PHONEPE = {
+  clientId: process.env.PHONEPE_CLIENT_ID,
+  clientSecret: process.env.PHONEPE_CLIENT_SECRET,
+  clientVersion: process.env.PHONEPE_CLIENT_VERSION || "1",
+  baseUrl:
+    process.env.PHONEPE_ENV === "SANDBOX"
       ? "https://api-preprod.phonepe.com/apis/pg-sandbox"
-      : "https://api.phonepe.com/apis/hermes",
+      : "https://api.phonepe.com/apis/pg",
 };
 
-if (!PHONEPE_CONFIG.merchantId || !PHONEPE_CONFIG.saltKey) {
-  console.error("❌ PhonePe ENV variables missing");
-}
+let accessToken = null;
+let tokenExpiry = 0;
 
 /* =========================
-   CHECKSUM GENERATOR (v2)
+   GET ACCESS TOKEN
 ========================= */
-function generateChecksum(payload, endpoint) {
-  const data = payload + endpoint + PHONEPE_CONFIG.saltKey;
-  const hash = crypto.createHash("sha256").update(data).digest("hex");
-  return hash + "###" + PHONEPE_CONFIG.saltIndex;
+async function getAccessToken() {
+  if (accessToken && Date.now() < tokenExpiry) {
+    return accessToken;
+  }
+
+  const params = new URLSearchParams();
+  params.append("client_id", PHONEPE.clientId);
+  params.append("client_secret", PHONEPE.clientSecret);
+  params.append("client_version", PHONEPE.clientVersion);
+  params.append("grant_type", "client_credentials");
+
+  const response = await axios.post(
+    `${PHONEPE.baseUrl}/v1/oauth/token`,
+    params,
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    }
+  );
+
+  accessToken = response.data.access_token;
+  tokenExpiry = response.data.expires_at * 1000;
+
+  return accessToken;
 }
 
 /* =========================
    HEALTH CHECK
 ========================= */
-app.get("/", (req, res) => {
-  res.send("✅ PhonePe backend running (v2)");
+app.get("/", (_, res) => {
+  res.send("✅ PhonePe V2 backend running");
 });
 
 /* =========================
-   INITIATE PAYMENT (v2)
+   CREATE PAYMENT
 ========================= */
-app.post("/api/phonepe/pay", async (req, res) => {
+app.post("/api/phonepe/create-payment", async (req, res) => {
   try {
-    const {
-      merchantTransactionId,
-      amount,
-      merchantUserId,
-      callbackUrl,
-      redirectUrl,
-    } = req.body;
+    const show = console.log;
 
-    if (
-      !merchantTransactionId ||
-      !amount ||
-      !merchantUserId ||
-      !callbackUrl ||
-      !redirectUrl
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Missing required fields",
-      });
+    const { orderId, amount, redirectUrl } = req.body;
+
+    if (!orderId || !amount || !redirectUrl) {
+      return res.status(400).json({ error: "Missing fields" });
     }
 
-    const payloadData = {
-      merchantId: PHONEPE_CONFIG.merchantId,
-      merchantTransactionId,
-      merchantUserId,
-      amount: Number(amount) * 100, // convert to paise
-      redirectUrl,
-      redirectMode: "REDIRECT",
-      callbackUrl,
-      paymentInstrument: {
-        type: "PAY_PAGE",
+    const token = await getAccessToken();
+
+    const payload = {
+      merchantOrderId: orderId,
+      amount: Number(amount), // already in paise
+      paymentFlow: {
+        type: "PG_CHECKOUT",
+        merchantUrls: {
+          redirectUrl,
+        },
       },
     };
 
-    const base64Payload = Buffer.from(
-      JSON.stringify(payloadData)
-    ).toString("base64");
-
-    const checksum = generateChecksum(base64Payload, "/pg/v2/pay");
-
     const response = await axios.post(
-      `${PHONEPE_CONFIG.apiUrl}/pg/v2/pay`,
-      { request: base64Payload },
+      `${PHONEPE.baseUrl}/checkout/v2/pay`,
+      payload,
       {
         headers: {
+          Authorization: `O-Bearer ${token}`,
           "Content-Type": "application/json",
-          "X-VERIFY": checksum,
         },
       }
     );
 
     return res.json({
       success: true,
-      paymentUrl:
-        response.data.data.instrumentResponse.redirectInfo.url,
+      redirectUrl: response.data.data.instrumentResponse.redirectInfo.url,
       raw: response.data,
     });
-  } catch (error) {
-    console.error("❌ PhonePe API ERROR:", error.response?.data || error.message);
+  } catch (err) {
+    console.error("❌ CREATE PAYMENT ERROR:", err.response?.data || err.message);
     return res.status(500).json({
       success: false,
-      error: error.response?.data || error.message,
+      error: err.response?.data || err.message,
     });
   }
 });
 
 /* =========================
-   CHECK PAYMENT STATUS (v2)
+   PAYMENT STATUS
 ========================= */
-app.get("/api/phonepe/status/:transactionId", async (req, res) => {
+app.get("/api/phonepe/status/:orderId", async (req, res) => {
   try {
-    const { transactionId } = req.params;
+    const token = await getAccessToken();
 
-    if (!transactionId) {
-      return res.status(400).json({
-        success: false,
-        error: "Transaction ID is required",
-      });
-    }
-
-    const endpoint = `/pg/v2/status/${PHONEPE_CONFIG.merchantId}/${transactionId}`;
-    const checksum = generateChecksum("", endpoint); // empty payload for status check
-
-    const response = await axios.get(`${PHONEPE_CONFIG.apiUrl}${endpoint}`, {
-      headers: {
-        "Content-Type": "application/json",
-        "X-VERIFY": checksum,
-        "X-MERCHANT-ID": PHONEPE_CONFIG.merchantId,
-      },
-    });
-
-    return res.json({
-      success: true,
-      status: response.data,
-    });
-  } catch (error) {
-    console.error("❌ PhonePe STATUS API ERROR:", error.response?.data || error.message);
-    return res.status(500).json({
-      success: false,
-      error: error.response?.data || error.message,
-    });
-  }
-});
-
-/* =========================
-   CALLBACK VERIFICATION (v2)
-========================= */
-app.post("/api/phonepe/callback", async (req, res) => {
-  try {
-    console.log("📩 CALLBACK RECEIVED:", req.body);
-
-    const base64Payload = req.body.response;
-    if (!base64Payload) {
-      return res.status(400).json({
-        success: false,
-        error: "Missing response payload",
-      });
-    }
-
-    const decodedPayload = JSON.parse(
-      Buffer.from(base64Payload, "base64").toString("utf8")
+    const response = await axios.get(
+      `${PHONEPE.baseUrl}/checkout/v2/order/${req.params.orderId}`,
+      {
+        headers: {
+          Authorization: `O-Bearer ${token}`,
+        },
+      }
     );
 
-    console.log("🔎 DECODED CALLBACK PAYLOAD:", decodedPayload);
-
-    const endpoint =
-      "/pg/v2/status/" +
-      PHONEPE_CONFIG.merchantId +
-      "/" +
-      decodedPayload.merchantTransactionId;
-
-    const expectedChecksum = generateChecksum(base64Payload, endpoint);
-    const receivedChecksum = req.headers["x-verify"];
-
-    if (expectedChecksum !== receivedChecksum) {
-      console.error("❌ Invalid checksum in callback");
-      return res.status(400).json({
-        success: false,
-        error: "Checksum mismatch",
-      });
-    }
-
-    console.log("✅ Callback verified successfully");
-
-    if (decodedPayload.code === "PAYMENT_SUCCESS") {
-      console.log("💰 Payment successful for:", decodedPayload.merchantTransactionId);
-      // TODO: Update DB here
-    } else {
-      console.log("⚠️ Payment not successful:", decodedPayload.code);
-    }
-
-    return res.json({
-      success: true,
-      data: decodedPayload,
-    });
-  } catch (error) {
-    console.error("❌ CALLBACK ERROR:", error.message);
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    res.json(response.data);
+  } catch (err) {
+    res.status(500).json(err.response?.data || err.message);
   }
 });
 
@@ -215,5 +138,5 @@ app.post("/api/phonepe/callback", async (req, res) => {
    START SERVER
 ========================= */
 app.listen(PORT, () => {
-  console.log(`🚀 PhonePe middleware (v2) running on port ${PORT}`);
+  console.log(`🚀 PhonePe V2 server running on ${PORT}`);
 });
