@@ -65,6 +65,8 @@ app.get("/", (_, res) => {
    CREATE PAYMENT
 ========================= */
 app.post("/api/phonepe/create-payment", async (req, res) => {
+   res.json({ ok: true });
+});
   try {
     const show = console.log;
 
