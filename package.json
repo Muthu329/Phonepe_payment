@@ -1,6 +1,7 @@
 {
-  "name": "phonepe-middleware",
-  "version": "1.0.0",
+  "name": "phonepe-middleware-v2",
+  "version": "2.0.0",
+  "description": "PhonePe payment middleware using v2 APIs",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
