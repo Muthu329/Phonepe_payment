@@ -1,5 +1,5 @@
 /**************************************************
- * PHONEPE PG V2 BACKEND (PRODUCTION-READY)
+ * PHONEPE PG V2 STANDARD CHECKOUT (OAUTH)
  **************************************************/
 
 const express = require("express");
@@ -38,45 +38,53 @@ let tokenExpiry = 0;
 
 async function getAccessToken() {
   const now = Date.now();
-  
+
   if (cachedToken && now < tokenExpiry) {
     return cachedToken;
   }
 
-  const params = new URLSearchParams();
-  params.append("client_id", PHONEPE.clientId);
-  params.append("client_version", PHONEPE.clientVersion);
-  params.append("client_secret", PHONEPE.clientSecret);
-  params.append("grant_type", "client_credentials");
+  try {
+    const params = new URLSearchParams();
+    params.append("client_id", PHONEPE.clientId);
+    params.append("client_version", PHONEPE.clientVersion);
+    params.append("client_secret", PHONEPE.clientSecret);
+    params.append("grant_type", "client_credentials");
 
-  const response = await axios.post(
-    `${PHONEPE.baseUrl}/v1/token`,
-    params,
-    {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    }
-  );
+    const response = await axios.post(
+      `${PHONEPE.baseUrl}/v1/oauth/token`,
+      params,
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      }
+    );
 
-  cachedToken = response.data.access_token;
-  tokenExpiry = now + 9 * 60 * 1000;
+    cachedToken = response.data.access_token;
+    tokenExpiry = now + 9 * 60 * 1000; // 9min buffer
 
-  return cachedToken;
+    console.log("✅ Token obtained, expires at:", new Date(tokenExpiry));
+    return cachedToken;
+  } catch (error) {
+    console.error("❌ TOKEN ERROR:", error.response?.data || error.message);
+    throw error;
+  }
 }
 
 /**************************************************
  * HEALTH CHECK
  **************************************************/
 app.get("/", (req, res) => {
-  res.json({ 
+  res.json({
     status: "running",
-    env: process.env.PHONEPE_ENV || "SANDBOX"
+    env: process.env.PHONEPE_ENV || "SANDBOX",
+    clientId: PHONEPE.clientId,
+    baseUrl: PHONEPE.baseUrl,
   });
 });
 
 /**************************************************
- * CREATE PAYMENT
+ * CREATE PAYMENT (V2 STANDARD CHECKOUT)
  **************************************************/
 app.post("/api/phonepe/create-payment", async (req, res) => {
   try {
@@ -97,8 +105,10 @@ app.post("/api/phonepe/create-payment", async (req, res) => {
       });
     }
 
+    // Get OAuth token
     const token = await getAccessToken();
 
+    // Payment payload (V2 Standard Checkout format)
     const payload = {
       merchantOrderId: orderId,
       amount: amountNum,
@@ -110,63 +120,84 @@ app.post("/api/phonepe/create-payment", async (req, res) => {
       },
     };
 
+    console.log("📤 Creating payment:", payload);
+
+    // API call
     const response = await axios.post(
       `${PHONEPE.baseUrl}/checkout/v2/pay`,
       payload,
       {
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          Authorization: `O-Bearer ${token}`,
+          accept: "application/json",
         },
       }
     );
 
+    console.log("✅ Payment created:", response.data);
+
     return res.json({
       success: true,
-      paymentUrl: response.data.data.instrumentResponse.redirectInfo.url,
-      orderId: orderId,
+      paymentUrl: response.data.redirectUrl,
+      orderId: response.data.orderId,
+      state: response.data.state,
     });
-
   } catch (error) {
-    console.error("❌ CREATE PAYMENT:", error.response?.data || error.message);
+    console.error(
+      "❌ CREATE PAYMENT ERROR:",
+      error.response?.data || error.message
+    );
 
     return res.status(500).json({
       success: false,
       error: error.response?.data?.message || "Payment creation failed",
+      details: error.response?.data,
     });
   }
 });
 
 /**************************************************
- * PAYMENT STATUS
+ * PAYMENT STATUS (V2 STANDARD CHECKOUT)
  **************************************************/
 app.get("/api/phonepe/status/:orderId", async (req, res) => {
   try {
     const { orderId } = req.params;
+
     const token = await getAccessToken();
 
+    console.log("📤 Checking status for:", orderId);
+
     const response = await axios.get(
-      `${PHONEPE.baseUrl}/checkout/v2/order/${orderId}`,
+      `${PHONEPE.baseUrl}/checkout/v2/order/${orderId}/status?details=false`,
       {
         headers: {
-          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Authorization: `O-Bearer ${token}`,
+          accept: "application/json",
         },
       }
     );
 
+    console.log("✅ Status retrieved:", response.data);
+
     return res.json({
       success: true,
-      status: response.data.data.status,
-      amount: response.data.data.amount,
-      orderId: orderId,
+      orderId: response.data.orderId,
+      state: response.data.state,
+      amount: response.data.amount,
+      paymentDetails: response.data.paymentDetails,
     });
-
   } catch (error) {
-    console.error("❌ STATUS CHECK:", error.response?.data || error.message);
+    console.error(
+      "❌ STATUS CHECK ERROR:",
+      error.response?.data || error.message
+    );
 
     return res.status(500).json({
       success: false,
       error: "Status check failed",
+      details: error.response?.data,
     });
   }
 });
@@ -176,5 +207,57 @@ app.get("/api/phonepe/status/:orderId", async (req, res) => {
  **************************************************/
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📍 Environment: ${process.env.PHONEPE_ENV || 'SANDBOX'}`);
+  console.log(`📍 Environment: ${process.env.PHONEPE_ENV || "SANDBOX"}`);
+  console.log(`🔗 Base URL: ${PHONEPE.baseUrl}`);
+  console.log(`🆔 Client ID: ${PHONEPE.clientId}`);
 });
+```
+
+---
+
+## ⚙️ ENV VARIABLES (RENDER)
+
+**Delete old variables, add these:**
+```
+PHONEPE_CLIENT_ID=your_client_id
+PHONEPE_CLIENT_SECRET=your_client_secret
+PHONEPE_CLIENT_VERSION=1
+PHONEPE_ENV=SANDBOX
+```
+
+---
+
+## 🔑 GET YOUR CREDENTIALS
+
+### **Option 1: PhonePe Business Dashboard**
+1. Login: https://business.phonepe.com/
+2. Go to: **Developer** → **API Keys**
+3. Copy:
+   - Client ID
+   - Client Secret
+   - Client Version (usually `1`)
+
+### **Option 2: Contact PhonePe Support**
+- If you don't see API keys in dashboard
+- Email: merchantsupport@phonepe.com
+- Request: V2 Standard Checkout credentials
+
+---
+
+## 📋 KEY DIFFERENCES FROM BEFORE
+
+| Before (Wrong) | Now (Correct) |
+|----------------|---------------|
+| SHA256 checksum | OAuth Bearer token |
+| `/pg/v1/pay` | `/checkout/v2/pay` |
+| Base64 payload | Direct JSON |
+| `merchantId`/`saltKey` | `client_id`/`client_secret` |
+| `X-VERIFY` header | `Authorization: O-Bearer` |
+
+---
+
+## ✅ TESTING CHECKLIST
+
+### **1. Test Health Endpoint**
+```
+https://your-app.onrender.com/
