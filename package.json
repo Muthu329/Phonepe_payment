@@ -1,7 +1,7 @@
 {
-  "name": "phonepe-pg-backend",
+  "name": "phonepe-pg-v2",
   "version": "2.0.0",
-  "description": "PhonePe PG V2 - Production payment gateway backend",
+  "description": "PhonePe Payment Gateway V2 Standard Checkout - OAuth Backend",
   "main": "server.js",
   "engines": {
     "node": ">=18.0.0"
