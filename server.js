@@ -1,5 +1,5 @@
 /**************************************************
- * PHONEPE PG V2 BACKEND (BUBBLE COMPATIBLE)
+ * PHONEPE PG V2 BACKEND (PRODUCTION-READY)
  **************************************************/
 
 const express = require("express");
@@ -13,32 +13,36 @@ app.use(cors());
 const PORT = process.env.PORT || 10000;
 
 /**************************************************
- * ENV VARIABLES (SET IN RENDER)
- **************************************************
- * PHONEPE_CLIENT_ID
- * PHONEPE_CLIENT_SECRET
- * PHONEPE_CLIENT_VERSION   (usually 1)
- * PHONEPE_ENV              (SANDBOX or PROD)
+ * CONFIG
  **************************************************/
-
 const PHONEPE = {
   clientId: process.env.PHONEPE_CLIENT_ID,
   clientSecret: process.env.PHONEPE_CLIENT_SECRET,
   clientVersion: process.env.PHONEPE_CLIENT_VERSION || "1",
-  baseUrl=
+  baseUrl:
     process.env.PHONEPE_ENV === "PROD"
       ? "https://api.phonepe.com/apis"
       : "https://api-preprod.phonepe.com/apis/pg-sandbox",
 };
 
 if (!PHONEPE.clientId || !PHONEPE.clientSecret) {
-  console.error("❌ Missing PhonePe ENV variables");
+  console.error("❌ Missing PhonePe credentials");
+  process.exit(1);
 }
 
 /**************************************************
- * ACCESS TOKEN FUNCTION (V2)
+ * TOKEN CACHE (10min validity)
  **************************************************/
+let cachedToken = null;
+let tokenExpiry = 0;
+
 async function getAccessToken() {
+  const now = Date.now();
+  
+  if (cachedToken && now < tokenExpiry) {
+    return cachedToken;
+  }
+
   const params = new URLSearchParams();
   params.append("client_id", PHONEPE.clientId);
   params.append("client_version", PHONEPE.clientVersion);
@@ -46,7 +50,7 @@ async function getAccessToken() {
   params.append("grant_type", "client_credentials");
 
   const response = await axios.post(
-    `${PHONEPE.baseUrl}/v1/oauth/token`,
+    `${PHONEPE.baseUrl}/v1/token`,
     params,
     {
       headers: {
@@ -55,37 +59,52 @@ async function getAccessToken() {
     }
   );
 
-  return response.data.access_token;
+  cachedToken = response.data.access_token;
+  tokenExpiry = now + 9 * 60 * 1000; // 9min buffer
+
+  return cachedToken;
 }
 
 /**************************************************
  * HEALTH CHECK
  **************************************************/
 app.get("/", (req, res) => {
-  res.send("✅ PhonePe PG V2 backend running");
+  res.json({ 
+    status: "running",
+    env: process.env.PHONEPE_ENV || "SANDBOX"
+  });
 });
 
 /**************************************************
- * CREATE PAYMENT (USED BY BUBBLE)
+ * CREATE PAYMENT
  **************************************************/
 app.post("/api/phonepe/create-payment", async (req, res) => {
   try {
     const { orderId, amount, redirectUrl } = req.body;
 
+    // Validation
     if (!orderId || !amount || !redirectUrl) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields",
+        message: "Missing: orderId, amount, or redirectUrl",
       });
     }
 
-    // 1️⃣ Get Access Token
+    const amountNum = Number(amount);
+    if (isNaN(amountNum) || amountNum < 100) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be ≥100 paise (₹1)",
+      });
+    }
+
+    // Get token
     const token = await getAccessToken();
 
-    // 2️⃣ Payment Payload (V2)
+    // Payment payload
     const payload = {
       merchantOrderId: orderId,
-      amount: Number(amount), // amount in paise
+      amount: amountNum,
       paymentFlow: {
         type: "PG_CHECKOUT",
         merchantUrls: {
@@ -94,71 +113,71 @@ app.post("/api/phonepe/create-payment", async (req, res) => {
       },
     };
 
-    // 3️⃣ Call PhonePe Create Payment API
+    // Create payment
     const response = await axios.post(
       `${PHONEPE.baseUrl}/checkout/v2/pay`,
       payload,
       {
         headers: {
-          Authorization: `O-Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
       }
     );
 
-    // 4️⃣ Return Payment URL to Bubble
     return res.json({
       success: true,
       paymentUrl:
         response.data.data.instrumentResponse.redirectInfo.url,
-      raw: response.data,
+      orderId: orderId,
     });
 
   } catch (error) {
     console.error(
-      "❌ CREATE PAYMENT ERROR:",
+      "❌ CREATE PAYMENT:",
       error.response?.data || error.message
     );
 
     return res.status(500).json({
       success: false,
-      error: error.response?.data || error.message,
+      error: error.response?.data?.message || "Payment creation failed",
     });
   }
 });
 
 /**************************************************
- * PAYMENT STATUS (OPTIONAL – FOR REDIRECT PAGE)
+ * PAYMENT STATUS
  **************************************************/
 app.get("/api/phonepe/status/:orderId", async (req, res) => {
   try {
     const { orderId } = req.params;
-
     const token = await getAccessToken();
 
     const response = await axios.get(
       `${PHONEPE.baseUrl}/checkout/v2/order/${orderId}`,
       {
         headers: {
-          Authorization: `O-Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
       }
     );
 
     return res.json({
       success: true,
-      status: response.data,
+      status: response.data.data.status,
+      amount: response.data.data.amount,
+      orderId: orderId,
     });
 
   } catch (error) {
     console.error(
-      "❌ STATUS ERROR:",
+      "❌ STATUS CHECK:",
       error.response?.data || error.message
     );
 
     return res.status(500).json({
       success: false,
-      error: error.response?.data || error.message,
+      error: "Status check failed",
     });
   }
 });
@@ -167,5 +186,10 @@ app.get("/api/phonepe/status/:orderId", async (req, res) => {
  * START SERVER
  **************************************************/
 app.listen(PORT, () => {
-  console.log(`🚀 PhonePe PG V2 backend running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📍 Environment: ${process.env.PHONEPE_ENV || 'SANDBOX'}`);
 });
+```
+
+---
+
