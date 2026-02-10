@@ -25,7 +25,7 @@ const PHONEPE = {
   clientId: process.env.PHONEPE_CLIENT_ID,
   clientSecret: process.env.PHONEPE_CLIENT_SECRET,
   clientVersion: process.env.PHONEPE_CLIENT_VERSION || "1",
-  const BASE_URL =
+  baseUrl=
     process.env.PHONEPE_ENV === "PROD"
       ? "https://api.phonepe.com/apis"
       : "https://api-preprod.phonepe.com/apis/pg-sandbox",
