@@ -60,7 +60,7 @@ async function getAccessToken() {
   );
 
   cachedToken = response.data.access_token;
-  tokenExpiry = now + 9 * 60 * 1000; // 9min buffer
+  tokenExpiry = now + 9 * 60 * 1000;
 
   return cachedToken;
 }
@@ -82,7 +82,6 @@ app.post("/api/phonepe/create-payment", async (req, res) => {
   try {
     const { orderId, amount, redirectUrl } = req.body;
 
-    // Validation
     if (!orderId || !amount || !redirectUrl) {
       return res.status(400).json({
         success: false,
@@ -98,10 +97,8 @@ app.post("/api/phonepe/create-payment", async (req, res) => {
       });
     }
 
-    // Get token
     const token = await getAccessToken();
 
-    // Payment payload
     const payload = {
       merchantOrderId: orderId,
       amount: amountNum,
@@ -113,7 +110,6 @@ app.post("/api/phonepe/create-payment", async (req, res) => {
       },
     };
 
-    // Create payment
     const response = await axios.post(
       `${PHONEPE.baseUrl}/checkout/v2/pay`,
       payload,
@@ -127,16 +123,12 @@ app.post("/api/phonepe/create-payment", async (req, res) => {
 
     return res.json({
       success: true,
-      paymentUrl:
-        response.data.data.instrumentResponse.redirectInfo.url,
+      paymentUrl: response.data.data.instrumentResponse.redirectInfo.url,
       orderId: orderId,
     });
 
   } catch (error) {
-    console.error(
-      "❌ CREATE PAYMENT:",
-      error.response?.data || error.message
-    );
+    console.error("❌ CREATE PAYMENT:", error.response?.data || error.message);
 
     return res.status(500).json({
       success: false,
@@ -170,10 +162,7 @@ app.get("/api/phonepe/status/:orderId", async (req, res) => {
     });
 
   } catch (error) {
-    console.error(
-      "❌ STATUS CHECK:",
-      error.response?.data || error.message
-    );
+    console.error("❌ STATUS CHECK:", error.response?.data || error.message);
 
     return res.status(500).json({
       success: false,
@@ -189,7 +178,3 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📍 Environment: ${process.env.PHONEPE_ENV || 'SANDBOX'}`);
 });
-```
-
----
-
