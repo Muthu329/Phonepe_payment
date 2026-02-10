@@ -61,7 +61,7 @@ async function getAccessToken() {
     );
 
     cachedToken = response.data.access_token;
-    tokenExpiry = now + 9 * 60 * 1000; // 9min buffer
+    tokenExpiry = now + 9 * 60 * 1000;
 
     console.log("✅ Token obtained, expires at:", new Date(tokenExpiry));
     return cachedToken;
@@ -105,10 +105,8 @@ app.post("/api/phonepe/create-payment", async (req, res) => {
       });
     }
 
-    // Get OAuth token
     const token = await getAccessToken();
 
-    // Payment payload (V2 Standard Checkout format)
     const payload = {
       merchantOrderId: orderId,
       amount: amountNum,
@@ -122,7 +120,6 @@ app.post("/api/phonepe/create-payment", async (req, res) => {
 
     console.log("📤 Creating payment:", payload);
 
-    // API call
     const response = await axios.post(
       `${PHONEPE.baseUrl}/checkout/v2/pay`,
       payload,
@@ -211,7 +208,3 @@ app.listen(PORT, () => {
   console.log(`🔗 Base URL: ${PHONEPE.baseUrl}`);
   console.log(`🆔 Client ID: ${PHONEPE.clientId}`);
 });
-```
-
----
-
